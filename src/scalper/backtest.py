@@ -278,3 +278,162 @@ def walk_forward(
         broker = broker_factory()
         results.append(run_backtest(cfg, broker, strategy, symbol, chunk))
     return results
+
+
+# ----------------------------------------------------------------------------- #
+# Multi-symbol portfolio backtest
+# ----------------------------------------------------------------------------- #
+def _portfolio_timeline(frames: dict[str, pd.DataFrame]) -> list[tuple[datetime, str]]:
+    """Every (bar time, symbol) pair, ordered by time then symbol.
+
+    Symbols are interleaved on one clock so the single account sees them in the
+    order the market did. Ties are broken by symbol name so a run is
+    deterministic — without that, two symbols printing the same minute could
+    swap order through dict iteration and produce a different equity curve.
+    """
+    events: list[tuple[datetime, str]] = []
+    for symbol, df in frames.items():
+        events.extend((ts, symbol) for ts in df.index.to_pydatetime())
+    events.sort(key=lambda item: (item[0], item[1]))
+    return events
+
+
+def run_portfolio_backtest(
+    cfg: AppConfig,
+    broker: Broker,
+    strategy_by_symbol: dict[str, Strategy],
+    frames: dict[str, pd.DataFrame],
+    *,
+    risk: RiskManager | None = None,
+    record_equity: bool = True,
+    max_bars: int | None = None,
+) -> BacktestResult:
+    """Run every symbol through ONE engine sharing one account.
+
+    This is the honest way to size several pairs at once. Summing independent
+    per-symbol runs is wrong in two directions:
+
+      * **Overstated.** Each run starts with the full balance, so five symbols
+        each risking 0.5% look like five accounts, and every one of them can be
+        at its own `max_concurrent_positions` limit.
+      * **Understated.** Open risk is never netted. Being long EURUSD, long
+        GBPUSD and short USDJPY is one dollar bet, not three; the sum cannot
+        show you that the three stop-outs arrive together.
+
+    Here every position is sized from one live equity figure, the concurrency
+    and daily-trade caps are enforced portfolio-wide, and correlated drawdown
+    is whatever one account actually experienced. Note that positions are
+    marked to market on the bars they trade: with well-behaved per-symbol data
+    that is exact, and symbols with sparse or non-overlapping history simply
+    contribute nothing while they are flat.
+    """
+    started = time.perf_counter()
+    if not frames:
+        raise ValueError("portfolio backtest needs at least one symbol's data")
+
+    from .risk import build_risk_manager
+
+    risk_manager = risk or build_risk_manager(cfg)
+    unknown = sorted(set(frames) - set(strategy_by_symbol))
+    if unknown:
+        raise ValueError(f"no strategy supplied for {unknown}")
+    any_strategy = strategy_by_symbol[sorted(frames)[0]]
+    engine = Engine(cfg, broker, any_strategy, risk_manager, record_equity=record_equity)
+
+    broker.connect()
+    for symbol in sorted(frames):
+        engine.prepare_symbol(symbol, frames[symbol], cfg.instrument(symbol))
+
+    events = _portfolio_timeline({s: frames[s] for s in sorted(frames)})
+    if max_bars is not None:
+        events = events[: int(max_bars)]
+    if not events:
+        raise ValueError("portfolio backtest has no bars to process")
+
+    # Convert each frame once; per-bar `.loc` lookups in the hot loop would be
+    # an order of magnitude slower.
+    arrays: dict[str, dict[str, Any]] = {}
+    for symbol, df in frames.items():
+        arrays[symbol] = {
+            "open": df["open"].to_numpy(dtype="float64"),
+            "high": df["high"].to_numpy(dtype="float64"),
+            "low": df["low"].to_numpy(dtype="float64"),
+            "close": df["close"].to_numpy(dtype="float64"),
+            "volume": df["volume"].to_numpy(dtype="float64"),
+            "index": {ts: i for i, ts in enumerate(df.index)},
+        }
+
+    for when, symbol in events:
+        row = arrays[symbol]["index"][when]
+        engine.on_bar(
+            symbol,
+            Bar(
+                time=when,
+                open=float(arrays[symbol]["open"][row]),
+                high=float(arrays[symbol]["high"][row]),
+                low=float(arrays[symbol]["low"][row]),
+                close=float(arrays[symbol]["close"][row]),
+                volume=float(arrays[symbol]["volume"][row]),
+                symbol=symbol,
+            ),
+            row,
+        )
+
+    engine.finish(events[-1][0])
+
+    metrics = compute_metrics(
+        trades=engine.trades,
+        equity_curve=engine.equity_curve,
+        initial_balance=cfg.account.initial_balance,
+        bars_per_year=cfg.annualization_bars,
+        risk_free_rate=cfg.backtest.risk_free_rate,
+    )
+    runtime = time.perf_counter() - started
+
+    data_warnings: list[str] = []
+    if str(cfg.data.source).lower() == "synthetic":
+        data_warnings.append(
+            "SYNTHETIC DATA: bars were generated by a random process, not taken from the "
+            "market. These results validate that the pipeline runs end to end; they say "
+            "nothing about whether the strategy is profitable. Re-run with data.source: "
+            "csv or mt5 and real history before drawing any conclusion."
+        )
+    data_warnings.append(
+        "PORTFOLIO: every symbol traded one shared account (sizing, concurrency cap and "
+        "daily loss cap applied to the account as a whole), so this is not the sum of the "
+        "per-symbol runs."
+    )
+    for symbol in sorted(frames):
+        for warning in frames[symbol].attrs.get("warnings", []):
+            data_warnings.append(f"{symbol}: {warning}")
+
+    summary = engine.summary()
+    summary["symbols"] = sorted(frames)
+    summary["bars_processed"] = engine.stats.bars_processed
+    result = BacktestResult(
+        symbol="PORTFOLIO",
+        strategy=any_strategy.name,
+        timeframe=cfg.data.timeframe.upper(),
+        start=events[0][0],
+        end=events[-1][0],
+        bars=len(events),
+        initial_balance=cfg.account.initial_balance,
+        final_balance=broker.balance(),
+        trades=list(engine.trades),
+        equity_curve=list(engine.equity_curve),
+        metrics=metrics,
+        engine_summary=summary,
+        data_warnings=data_warnings,
+        runtime_sec=runtime,
+        config_path=cfg.config_path,
+    )
+    log.info(
+        "PORTFOLIO backtest finished in %.2fs: %d symbols, %d bars, %d trades, net %+.2f, PF %.2f",
+        runtime,
+        len(frames),
+        len(events),
+        len(engine.trades),
+        result.final_balance - cfg.account.initial_balance,
+        metrics.profit_factor if metrics.profit_factor != float("inf") else 0.0,
+    )
+    return result

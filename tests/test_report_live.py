@@ -337,4 +337,5 @@ def test_polling_trades_incoming_bars(small_result):
     )
     trader.run()
     assert trader.engine.stats.bars_processed == 300
-    assert len(trader.engine.equity_curve) == 300
+    # One point per bar, plus the closing snapshot that `finish()` always takes.
+    assert len(trader.engine.equity_curve) == 301

@@ -21,6 +21,7 @@ python run.py doctor                     # check config, data and dependencies
 python run.py strategies                 # list strategies and their parameters
 python run.py backtest                   # backtest every configured symbol
 python run.py backtest --strategy vwap_pullback --symbol EURUSD
+python run.py backtest --portfolio          # all symbols on ONE shared account
 python run.py paper --max-bars 500       # watch it trade, with simulated fills
 python run.py download --out data        # dump bars to CSV for offline runs
 python run.py dashboard                 # browse results/ in a browser (optional)
@@ -188,6 +189,40 @@ See [`docs/configuration.md`](docs/configuration.md) for every field.
 
 ---
 
+## Portfolio mode: one account, many pairs
+
+```bash
+python run.py backtest --portfolio                    # every configured symbol
+python run.py backtest --portfolio --symbols EURUSD GBPUSD USDJPY
+```
+
+Without `--portfolio`, each symbol is a separate run with its own balance and its own limits, and the
+portfolio report just adds the rows up. That sum cannot be traded: five symbols each risking 0.5% of a
+full balance look like five accounts, every one of them gets its own `max_concurrent_positions`
+allowance, and open risk is never netted — being long EURUSD, long GBPUSD and short USDJPY is one
+dollar bet, not three.
+
+`--portfolio` puts every symbol through one engine on one account:
+
+- one equity figure sizes every position;
+- `max_concurrent_positions`, `max_trades_per_day` and the loss caps apply to the account, not to
+  each symbol;
+- the kill switch flattens everything and stops the whole book;
+- drawdown is the account's real peak-to-trough path, correlation included.
+
+The demo numbers show why it matters:
+
+| | Trades | Net | Max drawdown |
+| --- | --- | --- | --- |
+| Sum of five per-symbol runs | 297 | −5,592.53 | 12.07% each |
+| `--portfolio` (one account) | 55 | −1,204.40 | 12.04% |
+
+Summing claims a −55.9% loss that no single account could have suffered while obeying its own 12%
+kill switch — the kill switch fires once, and after it does, trading is over for the whole book. The
+sum is not conservative, it is simply a different question.
+
+---
+
 ## Getting real data
 
 You need M1 history. Two free routes:
@@ -252,7 +287,7 @@ config/config.yaml          # every tunable, commented
 run.py                      # zero-install launcher
 src/scalper/
   engine.py                 # the trading loop (shared by backtest/paper/live)
-  backtest.py               # historical driver + walk-forward
+  backtest.py               # historical driver, walk-forward, portfolio mode
   live.py                   # replay (paper) and MT5 polling loops
   risk.py                   # sizing, daily loss cap, drawdown kill switch
   metrics.py                # performance analytics
@@ -264,7 +299,7 @@ src/scalper/
   brokers/                  # paper (simulated) and mt5 (real) venues
   data/                     # synthetic, csv, mt5 feeds
 dashboard/app.py            # optional Streamlit reader for results/
-tests/                      # 193 tests, including lookahead proofs
+tests/                      # 208 tests, including lookahead proofs
 scripts/                    # parameter sweep and programmatic examples
 ```
 
@@ -273,7 +308,7 @@ scripts/                    # parameter sweep and programmatic examples
 ## Tests
 
 ```bash
-pytest -q                       # 193 tests, ~32s
+pytest -q                       # 208 tests, ~48s
 pytest tests/test_no_lookahead.py -v
 ```
 
@@ -290,6 +325,9 @@ The suite is where the claims live. Highlights:
   `wilder_smooth` replaced `pandas.ewm` (a 4-point difference at bar 14).
 - `test_risk_metrics.py` — a losing curve must not be able to report `+0.00%`; see the
   `monthly_returns` regression test for why "no data" is not the same as "flat".
+- `test_portfolio.py` — one account, several pairs: the concurrency cap and kill switch are account
+  limits, bars are consumed in time order, and `--portfolio` is asserted to differ from the sum of
+  per-symbol runs rather than merely claimed to.
 
 ---
 
@@ -297,9 +335,14 @@ The suite is where the claims live. Highlights:
 
 - **No strategy here has an edge on your data until you prove it does.** The demo numbers are
   negative and should stay that way on synthetic data.
-- Backtests are per-symbol. Multi-symbol live trading works (shared risk state, one position per
-  symbol), but a multi-symbol *portfolio* backtest is not implemented — the portfolio report adds up
-  per-symbol runs and warns you that the sum overstates what one account could do.
+- **`--portfolio` is the only way to size several pairs honestly.** Without it each symbol gets its
+  own run, its own starting balance and its own copy of every risk cap, and the portfolio report
+  simply adds them up — a sum that overstates what one account can do. See
+  [Portfolio mode](#portfolio-mode-one-account-many-pairs); the demo numbers below differ by 4.6x
+  depending on which you read.
+- Portfolio runs interleave symbols on one clock and mark positions to market as their own bars
+  arrive. If a symbol's history is sparse or the pairs do not overlap, its contribution while flat is
+  not modelled — the account simply does not move for that symbol.
 - MT5 is Windows-only. On Linux/macOS, use CSV history for research; execution needs a Windows VPS
   or Wine.
 - Spreads are constants. Real spreads widen; `max_spread_pips` is your only defence in-simulator.

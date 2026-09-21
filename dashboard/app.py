@@ -92,12 +92,24 @@ def _read_json(path: Path) -> dict:
         return {}
 
 
+# `write_portfolio_report` emits a lowercase `portfolio_<stamp>` summary that
+# adds per-symbol runs together — a lookalike, not a run. A `--portfolio`
+# backtest, on the other hand, IS a single-account run and is named after its
+# symbol, uppercase: `PORTFOLIO_<strategy>_<timeframe>_report.json`. The two are
+# told apart case-sensitively, which is why this check is not `.lower()`ed.
+_SUMMARY_PREFIX = "portfolio_"
+
+
 def discover(results_dir: Path | str = DEFAULT_RESULTS) -> list[Path]:
-    """Report JSONs in `results/`, newest first, ignoring portfolio summaries."""
+    """Report JSONs in `results/`, newest first, ignoring the aggregate summary."""
     results_dir = Path(results_dir)
     if not results_dir.is_dir():
         return []
-    files = [p for p in results_dir.glob("*_report.json") if not p.name.startswith("portfolio")]
+    files = [
+        p
+        for p in results_dir.glob("*_report.json")
+        if not p.name.startswith(_SUMMARY_PREFIX)
+    ]
     return sorted(files, key=lambda p: p.stat().st_mtime, reverse=True)
 
 
@@ -140,6 +152,25 @@ def load_run(report_path: Path | str) -> Run:
 
 def load_runs(results_dir: Path | str = DEFAULT_RESULTS) -> list[Run]:
     return [load_run(p) for p in discover(results_dir)]
+
+
+def overlap_warning(runs: list[Run]) -> str | None:
+    """Warn when a portfolio run is selected alongside the symbols inside it.
+
+    A `--portfolio` run already contains every symbol's trades on one account,
+    so adding it to the per-symbol runs counts the same trades twice. Neither
+    figure is wrong on its own; showing them as one total would be.
+    """
+    portfolio = [r for r in runs if r.symbol.upper() == "PORTFOLIO"]
+    others = [r for r in runs if r.symbol.upper() != "PORTFOLIO"]
+    if portfolio and others:
+        return (
+            f"{len(portfolio)} shared-account run(s) selected together with "
+            f"{len(others)} per-symbol run(s). The portfolio run already contains those same "
+            "trades, so \"net across runs\" double-counts them. Deselect one set (or read the "
+            "portfolio row alone) for a total that means something."
+        )
+    return None
 
 
 def comparison_table(runs: list[Run]) -> pd.DataFrame:
@@ -266,6 +297,10 @@ def render() -> None:  # pragma: no cover - exercised by `streamlit run`, not py
         c2.metric("Trades", f"{total_trades:,}")
         c3.metric("Net across runs", f"{total_net:,.2f}")
         c4.metric("Profitable runs", f"{winning}/{len(table)}")
+
+        overlap = overlap_warning(runs)
+        if overlap:
+            st.warning(overlap, icon="⚠️")
 
         st.subheader("Head to head")
         st.dataframe(

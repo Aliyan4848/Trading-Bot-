@@ -95,6 +95,9 @@ def cmd_backtest(args: argparse.Namespace) -> int:
     symbols = args.symbols or cfg.symbols
     synthetic = str(cfg.data.source).lower() == "synthetic"
 
+    if getattr(args, "portfolio", False):
+        return _run_portfolio_cli(args, cfg, frames, symbols, synthetic)
+
     results = []
     for symbol in symbols:
         if symbol not in frames:
@@ -137,6 +140,62 @@ def cmd_backtest(args: argparse.Namespace) -> int:
         print("!! Re-run with real history: data.source: csv (or mt5).\n")
     if len(results) > 1 and not args.no_reports:
         paths = write_portfolio_report(results, cfg, synthetic=synthetic)
+        for kind, path in paths.items():
+            log.info("wrote %s: %s", kind, path)
+    return 0
+
+
+def _run_portfolio_cli(
+    args: argparse.Namespace, cfg: Any, frames: dict[str, Any], symbols: list[str], synthetic: bool
+) -> int:
+    """`scalper backtest --portfolio`: one account, every symbol, one clock."""
+    from .backtest import run_portfolio_backtest
+    from .brokers import build_broker
+    from .report import write_all_reports
+    from .strategies import get_strategy
+
+    log = logging.getLogger("scalper.cli")
+    used = {s: frames[s] for s in symbols if s in frames}
+    missing = [s for s in symbols if s not in frames]
+    for symbol in missing:
+        log.warning("No data for %s, skipping", symbol)
+    if not used:
+        log.error("No data for any configured symbol.")
+        return 1
+
+    strategies = {
+        symbol: get_strategy(cfg.strategy.name, symbol=symbol, **cfg.strategy.params)
+        for symbol in used
+    }
+    broker = build_broker(cfg)
+    try:
+        result = run_portfolio_backtest(cfg, broker, strategies, used)
+    except (ValueError, RuntimeError) as exc:
+        log.error("portfolio backtest failed — %s", exc)
+        return 1
+
+    log.info("PORTFOLIO | %s", result.metrics.headline())
+    print()
+    print("=" * 100)
+    print(f"PORTFOLIO  {len(used)} symbols on one account: {', '.join(sorted(used))}")
+    print("-" * 100)
+    print(result.metrics.headline())
+    print("-" * 100)
+    print("per-symbol contribution (net P&L, % of trades)")
+    by_symbol: dict[str, list[float]] = {}
+    for trade in result.trades:
+        by_symbol.setdefault(trade.symbol, []).append(trade.net_pnl)
+    total_trades = max(1, len(result.trades))
+    for symbol, pnls in sorted(by_symbol.items(), key=lambda kv: -sum(kv[1])):
+        share = 100.0 * len(pnls) / total_trades
+        print(f"  {symbol:<8}{sum(pnls):>12,.2f}{share:>8.1f}%  ({len(pnls)} trades)")
+    print("=" * 100)
+    if synthetic:
+        print("\n!! SYNTHETIC DATA — these numbers validate the pipeline, not the strategy.")
+        print("!! Re-run with real history: data.source: csv (or mt5).\n")
+
+    if not getattr(args, "no_reports", False):
+        paths = write_all_reports(result, cfg, synthetic=synthetic)
         for kind, path in paths.items():
             log.info("wrote %s: %s", kind, path)
     return 0
@@ -442,6 +501,8 @@ def build_parser() -> argparse.ArgumentParser:
     bt.add_argument("--no-reports", action="store_true", help="skip writing report files")
     bt.add_argument("--walk-forward", type=int, default=0, metavar="FOLDS",
                     help="split history into N folds and report stability")
+    bt.add_argument("--portfolio", action="store_true",
+                    help="trade every symbol on ONE shared account instead of one run per symbol")
     bt.set_defaults(func=cmd_backtest)
 
     pp = sub.add_parser("paper", help="live paper trading on real market data", parents=[globals_parent])

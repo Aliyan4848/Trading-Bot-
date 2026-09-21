@@ -16,6 +16,7 @@ becomes a default.
 | `--balance 25000` | `account.initial_balance` |
 | `--risk 0.25` | `risk.risk_per_trade_pct` |
 | `--bars 300000` | `data.synthetic.bars` |
+| `--portfolio` | *(no config equivalent)* | Trade every symbol on one shared account instead of one run per symbol. |
 
 `data.synthetic.bars` counts *wall-clock minutes* from `data.synthetic.start`, not
 finished bars: weekend and holiday minutes are removed afterwards, so the frame
@@ -65,7 +66,7 @@ difference when sizing a run.
 | --- | --- | --- |
 | `risk_per_trade_pct` | `0.5` | % of **equity** risked between entry and stop. Drives lot size. |
 | `max_daily_loss_pct` | `3.0` | Stop opening trades after this much realized daily loss. Resets at the date change. |
-| `max_drawdown_pct` | `12.0` | Kill switch on peak-to-trough equity. Flattens everything and stops for good. |
+| `max_drawdown_pct` | `12.0` | Kill switch on peak-to-trough equity. Flattens everything and stops for good. Checked when a bar closes, so it can overshoot by however far the account moved inside that one bar — a gap through a stop realises more than the threshold allows. The overshoot is bounded by the worst single-bar move; it is not a rounding error and not a bug. |
 | `max_concurrent_positions` | `2` | Across all symbols. |
 | `max_trades_per_day` | `12` | Per calendar day (UTC). |
 | `min_lot` / `max_lot` / `lot_step` | `0.01 / 5.0 / 0.01` | Broker limits. Sizing rounds **down** to the step, so rounding never increases risk. |

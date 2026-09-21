@@ -120,6 +120,23 @@ def test_discover_ignores_portfolio_files_and_missing_directory(app, results_dir
     assert app.discover(results_dir / "does-not-exist") == []
 
 
+def test_discover_keeps_a_shared_account_portfolio_run(app, results_dir):
+    """`PORTFOLIO_...` is a run you asked for; `portfolio_<stamp>` is a summary.
+
+    The aggregate summary that `write_portfolio_report` emits exists only to add
+    per-symbol rows together, so it is not a run. A `--portfolio` backtest is a
+    real single-account run and must show up — matching the two by prefix alone
+    (and case-sensitively) got this backwards.
+    """
+    (results_dir / "PORTFOLIO_ema_rsi_momentum_M1_report.json").write_text(
+        json.dumps({"symbol": "PORTFOLIO", "strategy": "ema_rsi_momentum", "metrics": {}}),
+        encoding="utf-8",
+    )
+    names = {p.name for p in app.discover(results_dir)}
+    assert "PORTFOLIO_ema_rsi_momentum_M1_report.json" in names
+    assert not any(n.startswith("portfolio_") for n in names)
+
+
 def test_load_run_pulls_in_siblings_and_flags_synthetic_data(app, results_dir):
     run = app.load_run(results_dir / "EURUSD_ema_rsi_momentum_M1_report.json")
     assert (run.symbol, run.strategy, run.timeframe) == ("EURUSD", "ema_rsi_momentum", "M1")
@@ -232,3 +249,15 @@ def test_cli_dashboard_reports_a_missing_app_file(monkeypatch, tmp_path, capsys)
     code = cli.main(["dashboard"])
     assert code == 2
     assert "not found" in capsys.readouterr().err
+
+
+def test_overlap_warning_catches_double_counted_portfolio(app, results_dir):
+    """A portfolio run must not be totalled together with the runs inside it."""
+    per_symbol = app.load_runs(results_dir)
+    assert app.overlap_warning(per_symbol) is None
+
+    portfolio = app.load_run(results_dir / "EURUSD_ema_rsi_momentum_M1_report.json")
+    portfolio.symbol = "PORTFOLIO"
+    assert app.overlap_warning([portfolio]) is None, "a portfolio run on its own is fine"
+    warning = app.overlap_warning(per_symbol + [portfolio])
+    assert warning is not None and "double-count" in warning

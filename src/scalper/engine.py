@@ -586,8 +586,18 @@ class Engine:
     def finish(self, when: datetime | None = None) -> list[Trade]:
         """Flatten and flush at the end of a run."""
         closed = self.flatten_all(ExitReason.END_OF_DATA)
-        if self.record_equity and closed:
-            self._record_equity(when or closed[-1].exit_time)
+        if self.record_equity:
+            # Always snapshot the closing account, even when nothing was left
+            # open. Recording only when `closed` is non-empty makes the last
+            # point depend on whether the final bar happened to hold a position,
+            # so the curve (and therefore "final equity") ends at an arbitrary
+            # earlier bar. With this, `len(equity_curve) == bars_processed + 1`
+            # holds for every run.
+            stamp = when or (closed[-1].exit_time if closed else None)
+            if stamp is None:
+                stamp = max(self._last_bar_time.values(), default=None)
+            if stamp is not None:
+                self._record_equity(stamp)
         return closed
 
     def summary(self) -> dict[str, Any]:

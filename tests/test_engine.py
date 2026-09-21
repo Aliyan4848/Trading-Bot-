@@ -452,6 +452,27 @@ def test_equity_curve_has_one_point_per_bar():
     assert all(s.equity == pytest.approx(10_000.0) for s in engine.equity_curve)
 
 
+def test_finish_always_records_the_closing_account_state():
+    """`len(equity_curve) == bars_processed + 1` must not depend on luck.
+
+    Recording the final snapshot only when a position happened to be open makes
+    the last point of the curve an accident of the data: "final equity" would be
+    whatever the last bar with a position showed. Nothing open here, so this is
+    the case that used to skip it.
+    """
+    frame = make_frame([1.1000] * 12)
+    cfg = make_config()
+    engine, broker = run_engine(cfg, frame, ScriptedStrategy({}))
+
+    assert engine.stats.bars_processed == 12
+    assert len(engine.equity_curve) == 12
+
+    closed = engine.finish(frame.index[-1].to_pydatetime())
+    assert closed == []
+    assert len(engine.equity_curve) == 13
+    assert engine.equity_curve[-1].equity == pytest.approx(broker.equity())
+
+
 def test_finish_flattens_open_positions():
     frame = make_frame([1.1000] * 10)
     cfg = make_config()
