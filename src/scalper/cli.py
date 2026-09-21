@@ -345,6 +345,20 @@ def cmd_strategies(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_readiness(args: argparse.Namespace) -> int:
+    """Judge the artifacts in results/ against a go-live checklist."""
+    from .readiness import assess_readiness, format_report
+
+    cfg = _load(args)
+    report = assess_readiness(cfg, results_dir=args.results_dir)
+    print(format_report(report))
+    if getattr(args, "json", False):
+        import json as _json
+
+        print(_json.dumps(report.to_dict(), indent=2))
+    return 0 if not report.failures else 1
+
+
 def cmd_dashboard(args: argparse.Namespace) -> int:
     """Launch the optional Streamlit dashboard over `results/`."""
     import importlib.util
@@ -535,6 +549,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     dr = sub.add_parser("doctor", help="check config, data and dependencies", parents=[globals_parent])
     dr.set_defaults(func=cmd_doctor)
+
+    rd = sub.add_parser(
+        "readiness",
+        help="check the results in results/ against a go-live checklist",
+        parents=[globals_parent],
+    )
+    rd.add_argument("--results-dir", dest="results_dir", default=None,
+                    help="directory to read (default: reporting.output_dir)")
+    rd.add_argument("--json", action="store_true", help="also print the report as JSON")
+    rd.set_defaults(func=cmd_readiness)
 
     db = sub.add_parser(
         "dashboard",

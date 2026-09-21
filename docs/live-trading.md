@@ -2,6 +2,25 @@
 
 Read this fully before pointing the bot at an account that can lose money.
 
+## Before any of this: `scalper readiness`
+
+Arming the gates below proves nothing about whether the strategy works — they exist to prevent
+accidents, not to judge edge. Run the checklist first:
+
+```bash
+python run.py readiness
+```
+
+It reads `results/` and fails if the evidence is synthetic, too thin (under 100 trades), shorter than a
+year, unprofitable after costs, inconsistent across symbols, or an in-sample fit. It exits non-zero
+while blocked, so it can gate a deployment script. Two rules it will not bend:
+
+- synthetic data can never pass, no matter how favourable the numbers;
+- the *median* run decides, not the best one.
+
+Read it as "you have not obviously fooled yourself yet", not as a green light.
+
+
 ## The three gates
 
 Live orders require **all three**, deliberately, because a single mistake should not be able to

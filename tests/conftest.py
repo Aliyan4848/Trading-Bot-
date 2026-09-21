@@ -22,6 +22,21 @@ for path in (str(SRC), str(ROOT)):
 from scalper.config import AppConfig, InstrumentSpec, load_config  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _live_routing_always_off(monkeypatch):
+    """Guarantee no test runs with live order routing armed.
+
+    `load_env_file` writes into the real ``os.environ``, so a test that loads a
+    .env containing ``SCALPER_ALLOW_LIVE=yes`` leaks that value into every later
+    test in the process. That variable guards real orders, so the leak is not a
+    cosmetic problem. Pre-registering the variable here means monkeypatch deletes
+    it on teardown no matter who set it, and a test that genuinely wants it armed
+    still can, because its own `setenv` is undone after this one runs.
+    """
+    monkeypatch.delenv("SCALPER_ALLOW_LIVE", raising=False)
+    yield
+
+
 @pytest.fixture
 def config_path() -> Path:
     return ROOT / "config" / "config.yaml"

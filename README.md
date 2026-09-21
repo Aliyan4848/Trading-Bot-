@@ -24,6 +24,7 @@ python run.py backtest --strategy vwap_pullback --symbol EURUSD
 python run.py backtest --portfolio          # all symbols on ONE shared account
 python run.py paper --max-bars 500       # watch it trade, with simulated fills
 python run.py download --out data        # dump bars to CSV for offline runs
+python run.py readiness                 # should you deploy this? (checks your results/)
 python run.py dashboard                 # browse results/ in a browser (optional)
 ```
 
@@ -254,6 +255,37 @@ Full walkthrough: [`docs/getting-data.md`](docs/getting-data.md).
 
 ---
 
+## Should you deploy it?
+
+`python run.py readiness` answers that from your own artifacts instead of from optimism. It reads
+`results/` and reports each gate with the number behind it:
+
+```
+  [PASS] Backtest evidence exists                    6 run(s) found.
+  [FAIL] History is real market data                 All 6 run(s) are on synthetic data.
+  [PASS] Enough trades to mean anything (>=100)      352 trades.
+  [WARN] History covers a real cycle (>=365 days)    Longest run spans 138 days.
+  [FAIL] Profitable after spread and commission      Median expectancy is -0.236R; 0 run(s) positive.
+  [FAIL] Profit factor above 1.1                     Median profit factor is 0.48.
+  [FAIL] Edge shows on >=2 symbols                   No symbol is profitable (6 tested).
+  [WARN] Checked out of sample                       No fold or sweep evidence found.
+  [WARN] Drawdown inside the configured limit        Worst run drew down 12.33% against a 12.00% limit.
+  [PASS] Live routing switches                       Live routing is off — nothing can place a real order.
+  NOT READY  (3 pass, 3 warn, 4 fail)
+```
+
+Two properties make it worth trusting:
+
+- **Synthetic data can never pass**, however good the numbers look. Generated bars test the wiring.
+- **The median run decides, not the best run.** Gating on the best row of a sweep is how people ship
+  strategies that lose, so one spectacular symbol cannot carry a verdict.
+
+It exits non-zero while blocked, so it drops straight into a script or CI job. Passing every gate is
+necessary, not sufficient — it means you have not obviously fooled yourself yet, which is a much lower
+bar than "this will make money".
+
+---
+
 ## Going live (MetaTrader 5)
 
 Live routing needs **three independent confirmations**, because the failure mode of a mis-typed flag
@@ -299,7 +331,7 @@ src/scalper/
   brokers/                  # paper (simulated) and mt5 (real) venues
   data/                     # synthetic, csv, mt5 feeds
 dashboard/app.py            # optional Streamlit reader for results/
-tests/                      # 208 tests, including lookahead proofs
+tests/                      # 225 tests, including lookahead proofs
 scripts/                    # parameter sweep and programmatic examples
 ```
 
@@ -308,7 +340,7 @@ scripts/                    # parameter sweep and programmatic examples
 ## Tests
 
 ```bash
-pytest -q                       # 208 tests, ~48s
+pytest -q                       # 225 tests, ~50s
 pytest tests/test_no_lookahead.py -v
 ```
 

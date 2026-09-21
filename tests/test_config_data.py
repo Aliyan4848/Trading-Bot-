@@ -148,7 +148,12 @@ def test_env_file_parsing(tmp_path: Path, monkeypatch):
         "SCALPER_ALLOW_LIVE=yes\n"
         "  WEIRD = spaced  \n"
     )
-    monkeypatch.delenv("MT5_LOGIN", raising=False)
+    # Every key the .env file sets has to be pre-registered with monkeypatch, or
+    # `load_env_file` writes straight into the real process environment and the
+    # value outlives the test. SCALPER_ALLOW_LIVE is the dangerous one: leaving it
+    # set to "yes" arms live order routing for every test that runs afterwards.
+    for name in ("MT5_LOGIN", "MT5_SERVER", "SCALPER_ALLOW_LIVE", "WEIRD"):
+        monkeypatch.delenv(name, raising=False)
     loaded = load_env_file(env)
     assert loaded["MT5_LOGIN"] == "12345"
     assert loaded["MT5_SERVER"] == "Broker-Demo"
@@ -372,3 +377,33 @@ def test_infer_pip_size_guesses_by_price_magnitude():
     assert infer_pip_size(1.1050) == pytest.approx(0.0001)
     assert infer_pip_size(149.50) == pytest.approx(0.01)
     assert infer_pip_size(2050.0) == pytest.approx(0.1)
+
+
+# -----------------------------------------------------------------------------
+# Live-routing safety
+#
+# Definition order matters for the next two tests: the first one deliberately
+# leaks the variable that arms real order routing, and the second asserts it did
+# not survive. This is the exact bug that was live in this suite — a .env load
+# writing into os.environ left SCALPER_ALLOW_LIVE=yes set for every later test,
+# which is how `scalper doctor` and the readiness checklist could have reported
+# live routing as armed in a process that also runs the live command.
+# -----------------------------------------------------------------------------
+def test_a_leaked_live_flag_looks_armed():
+    import os
+
+    from scalper.config import is_live_allowed
+
+    os.environ["SCALPER_ALLOW_LIVE"] = "yes"  # what a .env load does
+    assert is_live_allowed(), "precondition: setting the variable must arm live routing"
+
+
+def test_the_next_test_sees_live_routing_off_again():
+    import os
+
+    from scalper.config import is_live_allowed
+
+    assert "SCALPER_ALLOW_LIVE" not in os.environ, (
+        "the autouse guard in tests/conftest.py did not clean up after the previous test"
+    )
+    assert not is_live_allowed(), "live routing must not be armed by default in tests"
