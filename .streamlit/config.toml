@@ -1,0 +1,19 @@
+# Streamlit settings for the optional results dashboard.
+#
+# headless   – do not try to open a browser (the server prints a URL instead).
+# enableCORS/XSRF off – the dashboard is meant to be viewed through whatever
+#   proxy/tunnel you happen to use (a VM, a container, an SSH tunnel). With both
+#   on, Streamlit rejects a browser whose Host header differs from the bind
+#   address with a 403 and a blank page.
+#   This server is read-only over files in `results/` and can start no trades,
+#   but do not expose it to the public internet: there is no authentication.
+[server]
+headless = true
+enableCORS = false
+enableXsrfProtection = false
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+base = "dark"
