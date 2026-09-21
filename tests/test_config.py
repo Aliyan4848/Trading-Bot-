@@ -33,9 +33,16 @@ def test_allow_live_trading_rejected() -> None:
 
 def test_exness_requires_demo_flag() -> None:
     with pytest.raises(ValidationError, match="demo-only"):
-        _make(broker="exness", exn_account_is_demo=False)
-    s = _make(broker="exness", exn_account_is_demo=True)
+        _make(broker="exness", exn_account_is_demo=False,
+              exn_api_key="k", exn_private_key="c2VlZA==", exn_account_id="123")
+    s = _make(broker="exness", exn_account_is_demo=True,
+              exn_api_key="k", exn_private_key="c2VlZA==", exn_account_id="123")
     assert s.broker.value == "exness"
+
+
+def test_exness_requires_credentials() -> None:
+    with pytest.raises(ValidationError, match="EXN_API_KEY"):
+        _make(broker="exness", exn_account_is_demo=True, exn_account_id="123")
 
 
 def test_negative_timeframe_rejected() -> None:

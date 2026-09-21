@@ -83,6 +83,9 @@ class Settings(BaseSettings):
     exn_account_id: str | None = None
     exn_api_base_url: str | None = None
     exn_account_is_demo: bool = False
+    exn_rest_timeout_s: float = 10.0
+    exn_ws_reconnect_max_s: float = 30.0
+    exn_op_timeout_s: float = 10.0  # ACK -> final-state wait before REST polling
 
     # ----- mt5 fallback (Windows host only) ---------------------------------
     mt5_login: int | None = None
@@ -102,10 +105,24 @@ class Settings(BaseSettings):
                 "ALLOW_LIVE_TRADING=true is rejected: live trading requires a "
                 "separate safety review and is not supported by this codebase."
             )
-        if self.broker is BrokerKind.EXNESS and not self.exn_account_is_demo:
-            raise ValueError(
-                "BROKER=exness requires EXN_ACCOUNT_IS_DEMO=true (demo-only restriction)."
-            )
+        if self.broker is BrokerKind.EXNESS:
+            if not self.exn_account_is_demo:
+                raise ValueError(
+                    "BROKER=exness requires EXN_ACCOUNT_IS_DEMO=true (demo-only restriction)."
+                )
+            missing = [
+                name
+                for name, val in (
+                    ("EXN_API_KEY", self.exn_api_key),
+                    ("EXN_PRIVATE_KEY", self.exn_private_key),
+                    ("EXN_ACCOUNT_ID", self.exn_account_id),
+                )
+                if not val
+            ]
+            if missing:
+                raise ValueError(
+                    "BROKER=exness requires: " + ", ".join(missing)
+                )
         for tf in self.bar_timeframes_s:
             if tf <= 0:
                 raise ValueError("bar timeframes must be positive seconds")

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from tradingbot.broker.exness.broker import ExnessBroker
 from tradingbot.broker.interfaces import BrokerClient, BrokerError
 from tradingbot.broker.paper import PaperBroker
 from tradingbot.core.config import BrokerKind, Settings
@@ -11,12 +12,9 @@ def create_broker(settings: Settings) -> BrokerClient:
     if settings.broker is BrokerKind.PAPER:
         return PaperBroker(settings)
     if settings.broker is BrokerKind.EXNESS:
-        # Implemented in Phase 3 (official Exness Public Trader API client).
-        raise BrokerError(
-            "BROKER_NOT_IMPLEMENTED",
-            "Exness API adapter lands in Phase 3. Until then use BROKER=paper, "
-            "or configure Phase 10 after the adapter is complete.",
-        )
+        # Official Exness Public Trader API adapter (Phase 3). Demo account is
+        # enforced at the settings level (EXN_ACCOUNT_IS_DEMO=true required).
+        return ExnessBroker(settings)
     if settings.broker is BrokerKind.MT5:
         raise BrokerError(
             "BROKER_NOT_IMPLEMENTED",
