@@ -1,0 +1,10 @@
+# Live / demo execution against a MetaTrader 5 terminal.
+#
+# IMPORTANT: The MetaTrader5 Python package is WINDOWS ONLY and requires the
+# MT5 terminal to be installed, running, and logged in on the same machine.
+# It cannot be installed on Linux/macOS (use Wine or a Windows VPS instead).
+#
+# Install this on top of requirements.txt when you move past paper trading:
+#     pip install -r requirements.txt -r requirements-mt5.txt
+#
+MetaTrader5>=5.0.45 ; platform_system == "Windows"

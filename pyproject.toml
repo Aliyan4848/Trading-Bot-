@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fx-scalper"
+version = "0.1.0"
+description = "Config-driven forex scalping bot: backtest, paper trade, and (optionally) execute on MetaTrader 5."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Aliyan Ahmed" }]
+keywords = ["forex", "scalping", "trading-bot", "metatrader5", "backtesting", "quant"]
+dependencies = [
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+mt5 = ["MetaTrader5>=5.0.45 ; platform_system == 'Windows'"]
+dashboard = ["streamlit>=1.30", "altair>=5.0"]
+dev = ["pytest>=7.4", "pytest-cov>=4.1", "ruff>=0.4"]
+
+[project.scripts]
+scalper = "scalper.cli:main"
+
+[project.urls]
+Repository = "https://github.com/Aliyan4848/Trading-Bot-"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]

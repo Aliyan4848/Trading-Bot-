@@ -1,0 +1,176 @@
+# =============================================================================
+#  FX Scalper — main configuration
+#  Everything the bot does is driven from this file. Copy it per-symbol-set or
+#  per-experiment rather than editing in place, e.g.:
+#      cp config/config.yaml config/config_gbpusd_m5.yaml
+# =============================================================================
+
+meta:
+  name: "fx-scalper"
+  log_level: "INFO"          # DEBUG | INFO | WARNING | ERROR
+  random_seed: 7
+
+account:
+  currency: USD
+  initial_balance: 10000.0
+  leverage: 30
+
+# -----------------------------------------------------------------------------
+# Data source + timeframe
+# -----------------------------------------------------------------------------
+data:
+  source: "synthetic"        # synthetic | csv | mt5
+  timeframe: "M1"            # M1 M5 M15 M30 H1 H4 D1
+  csv:
+    path: "data/EURUSD_M1.csv"
+    timestamp_column: "time"
+    tz: "UTC"
+  mt5:
+    bars: 50000              # how many bars to pull per symbol
+  synthetic:
+    symbols: []              # empty = every symbol in `instruments:` below
+    # Wall-clock MINUTES to generate from `start`. Weekend/holiday minutes are
+    # dropped, so the frame you get back is ~72% of this (200,000 -> ~143,800
+    # M1 bars, about 3 months of forex trading).
+    bars: 200000
+    start: "2024-01-01"
+    seed: 7
+    # Annualised volatility of the random component.
+    annual_vol: 0.08
+    # A trending regime's drift as a fraction of annual volatility
+    # (0.5 = a Sharpe-0.5 trend while that regime lasts; 0 = pure chop).
+    trend_strength: 0.5
+    regime_flip_bars: 3000   # how long a trend/chop regime persists
+    spread_pips: 0.6
+
+# -----------------------------------------------------------------------------
+# Execution venue
+#   paper -> simulated fills, real market data. Default, safe.
+#   mt5   -> orders go to your MT5 terminal (demo or live account).
+# -----------------------------------------------------------------------------
+broker:
+  mode: "paper"
+  mt5:
+    magic: 20260921
+    deviation_points: 20     # max slippage accepted on market orders
+    filling_mode: "IOC"      # IOC | FOK | RETURN
+    order_retries: 3
+    retry_sleep_sec: 0.5
+  paper:
+    slippage_pips: 0.3       # extra adverse fill beyond the spread
+    commission_per_lot: 7.0  # USD round-turn per 1.00 standard lot
+    stop_out_level_pct: 50.0 # margin call / stop-out emulation
+
+# -----------------------------------------------------------------------------
+# Risk management — the part that actually keeps the account alive
+# -----------------------------------------------------------------------------
+risk:
+  risk_per_trade_pct: 0.5    # % of equity risked between entry and stop
+  max_daily_loss_pct: 3.0    # stop opening trades after this daily drawdown
+  max_drawdown_pct: 12.0     # hard kill switch on peak-to-trough equity
+  max_concurrent_positions: 2
+  max_trades_per_day: 12
+  min_lot: 0.01
+  max_lot: 5.0
+  lot_step: 0.01
+  max_spread_pips: 2.0       # skip entries when the spread is wide
+  min_seconds_between_trades: 0
+  trailing_stop: false
+  trailing_start_r: 1.0      # start trailing after +1R
+  trailing_distance_r: 0.5
+  break_even_at_r: null      # e.g. 1.0 to move SL to break-even at +1R
+
+# -----------------------------------------------------------------------------
+# Trading sessions (UTC). Entries are blocked outside these windows.
+# -----------------------------------------------------------------------------
+session:
+  enabled: true
+  timezone: "UTC"
+  windows:
+    - { name: "London",   start: "07:00", end: "16:00" }
+    - { name: "New York", start: "12:00", end: "20:30" }
+  skip_friday_after: "19:00"
+  skip_weekend: true
+  # Close open positions on the last bar of a session (no overnight risk).
+  flat_at_close: true
+
+# -----------------------------------------------------------------------------
+# Strategy: swap `name` to use a different registered strategy.
+#   ema_rsi_momentum      - EMA cross confirmed by RSI + higher EMA trend
+#   bollinger_reversion   - fade band extremes back to the mean
+#   vwap_pullback         - trade pullbacks to session VWAP with the trend
+# -----------------------------------------------------------------------------
+strategy:
+  name: "ema_rsi_momentum"
+  params:
+    fast_ema: 9
+    slow_ema: 21
+    trend_ema: 200
+    rsi_period: 14
+    rsi_long_min: 52.0
+    rsi_short_max: 48.0
+    atr_period: 14
+    atr_stop_mult: 1.5
+    reward_risk: 1.8
+    min_atr_pips: 1.2        # dead market filter
+    max_atr_pips: 45.0       # news-spike filter
+    one_signal_per_cross: true
+    allow_shorts: true
+
+# -----------------------------------------------------------------------------
+# Instruments. pip_value_per_lot = account-currency value of a 1-pip move on
+# 1.00 lot. VERIFY these against your broker's contract specs before going live
+# (they differ per account type / broker).
+# -----------------------------------------------------------------------------
+instruments:
+  - symbol: EURUSD
+    pip_size: 0.0001
+    contract_size: 100000
+    pip_value_per_lot: 10.0
+    spread_pips: 0.6
+    digits: 5
+  - symbol: GBPUSD
+    pip_size: 0.0001
+    contract_size: 100000
+    pip_value_per_lot: 10.0
+    spread_pips: 0.9
+    digits: 5
+  - symbol: USDJPY
+    pip_size: 0.01
+    contract_size: 100000
+    pip_value_per_lot: 6.7     # proxy: ~10 / USDJPY rate
+    spread_pips: 0.7
+    digits: 3
+  - symbol: AUDUSD
+    pip_size: 0.0001
+    contract_size: 100000
+    pip_value_per_lot: 10.0
+    spread_pips: 0.9
+    digits: 5
+  - symbol: XAUUSD
+    pip_size: 0.1
+    contract_size: 100
+    pip_value_per_lot: 10.0
+    spread_pips: 2.0
+    digits: 2
+
+# -----------------------------------------------------------------------------
+# Backtest behaviour
+# -----------------------------------------------------------------------------
+backtest:
+  warmup_bars: 250           # bars to skip before allowing entries
+  entry_on_next_open: true   # signal at close -> fill at next bar open (no lookahead)
+  intrabar_priority: "stop"  # "stop" | "target" -> which is assumed hit first
+  annualization_bars: null   # null = derive from data.timeframe (recommended)
+  risk_free_rate: 0.0
+  export_trades: true
+
+# -----------------------------------------------------------------------------
+# Reporting
+# -----------------------------------------------------------------------------
+reporting:
+  output_dir: "results"
+  write_json: true
+  write_markdown: true
+  write_equity_csv: true
+  plot_equity_curve: true
